@@ -1,0 +1,179 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Threading;
+using System.Threading.Tasks;
+using SpotifyAPI.Web;
+using SpotifyByYear.Models;
+
+namespace SpotifyByYear.Services;
+
+public sealed class SpotifyService : ISpotifyService
+{
+    // Modify scopes are requested up front so creating year playlists later doesn't force a second sign-in.
+    private static readonly string[] RequiredScopes =
+    [
+        Scopes.PlaylistReadPrivate,
+        Scopes.PlaylistReadCollaborative,
+        Scopes.PlaylistModifyPrivate,
+        Scopes.PlaylistModifyPublic,
+    ];
+
+    private static readonly TimeSpan SignInTimeout = TimeSpan.FromMinutes(5);
+
+    private readonly TokenStore _tokenStore;
+    private readonly SemaphoreSlim _requestLock = new(1, 1);
+    private SpotifyClient? _client;
+    private PrivateUser? _currentUser;
+
+    public SpotifyService(TokenStore tokenStore)
+    {
+        _tokenStore = tokenStore;
+    }
+
+    public bool IsConnected => _client is not null;
+
+    public string? UserDisplayName => _currentUser?.DisplayName ?? _currentUser?.Id;
+
+    public async Task ConnectAsync(CancellationToken cancellationToken)
+    {
+        var settings = SpotifySettings.Load();
+
+        var storedToken = _tokenStore.Load();
+        if (storedToken is not null && HasRequiredScopes(storedToken))
+        {
+            try
+            {
+                await CreateClientAsync(settings, storedToken, cancellationToken);
+                return;
+            }
+            catch (APIException)
+            {
+                // Refresh token revoked or issued for a different Client ID; fall back to signing in.
+                _tokenStore.Clear();
+            }
+        }
+
+        var token = await SignInWithBrowserAsync(settings, cancellationToken);
+        _tokenStore.Save(token);
+        await CreateClientAsync(settings, token, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<PlaylistSummary>> GetOwnedPlaylistsAsync(CancellationToken cancellationToken)
+    {
+        if (_client is null || _currentUser is null)
+        {
+            throw new InvalidOperationException("Not connected to Spotify.");
+        }
+
+        var firstPage = await _client.Playlists.CurrentUsers(
+            new PlaylistCurrentUsersRequest { Limit = 50 }, cancellationToken);
+        var all = await _client.PaginateAll(firstPage, cancellationToken: cancellationToken);
+
+        return all
+            .Where(p => p.Id is not null && p.Owner?.Id == _currentUser.Id)
+            .Select(p => new PlaylistSummary(p.Id!, p.Name ?? "(untitled)", p.Items?.Total ?? 0))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<PlaylistTrackInfo>> GetPlaylistItemsAsync(string playlistId, CancellationToken cancellationToken)
+    {
+        if (_client is null)
+        {
+            throw new InvalidOperationException("Not connected to Spotify.");
+        }
+
+        var results = new List<PlaylistTrackInfo>();
+        var request = new PlaylistGetItemsRequest(PlaylistGetItemsRequest.AdditionalTypes.All)
+        {
+            Limit = 100,
+            Offset = 0,
+        };
+
+        while (true)
+        {
+            string body;
+            Paging<PlaylistTrack<IPlayableItem>> page;
+
+            // LastResponse is shared client state, so the call and the read must not interleave with other requests.
+            await _requestLock.WaitAsync(cancellationToken);
+            try
+            {
+                page = await _client.Playlists.GetPlaylistItems(playlistId, request, cancellationToken);
+                body = _client.LastResponse?.Body as string
+                    ?? throw new InvalidOperationException("Spotify response body was not available as JSON text.");
+            }
+            finally
+            {
+                _requestLock.Release();
+            }
+
+            results.AddRange(PlaylistItemParser.ParsePage(body, results.Count));
+
+            var pageCount = page.Items?.Count ?? 0;
+            if (page.Next is null || pageCount == 0)
+            {
+                break;
+            }
+
+            request.Offset += pageCount;
+        }
+
+        return results;
+    }
+
+    private async Task CreateClientAsync(SpotifySettings settings, PKCETokenResponse token, CancellationToken cancellationToken)
+    {
+        var authenticator = new PKCEAuthenticator(settings.ClientId, token);
+        authenticator.TokenRefreshed += (_, refreshed) => _tokenStore.Save(refreshed);
+
+        var config = SpotifyClientConfig.CreateDefault()
+            .WithAuthenticator(authenticator)
+            .WithRetryHandler(new SimpleRetryHandler()); // honors 429 Retry-After
+        var client = new SpotifyClient(config);
+
+        // Also validates the token (and refreshes it if it has expired).
+        _currentUser = await client.UserProfile.Current(cancellationToken);
+        _client = client;
+    }
+
+    private static async Task<PKCETokenResponse> SignInWithBrowserAsync(SpotifySettings settings, CancellationToken cancellationToken)
+    {
+        var (verifier, challenge) = PKCEUtil.GenerateCodes(100);
+        var state = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+
+        var loginRequest = new LoginRequest(settings.RedirectUri, settings.ClientId, LoginRequest.ResponseType.Code)
+        {
+            CodeChallengeMethod = "S256",
+            CodeChallenge = challenge,
+            Scope = RequiredScopes,
+            State = state,
+        };
+
+        using var listener = LoopbackCallbackListener.Start(settings.RedirectUri);
+        BrowserLauncher.Open(loginRequest.ToUri());
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(SignInTimeout);
+
+        string code;
+        try
+        {
+            code = await listener.WaitForCodeAsync(state, timeout.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException("Timed out waiting for Spotify sign-in to finish in the browser.");
+        }
+
+        return await new OAuthClient().RequestToken(
+            new PKCETokenRequest(settings.ClientId, code, settings.RedirectUri, verifier), cancellationToken);
+    }
+
+    private static bool HasRequiredScopes(PKCETokenResponse token)
+    {
+        var granted = (token.Scope ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return RequiredScopes.All(granted.Contains);
+    }
+}

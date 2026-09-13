@@ -1,0 +1,109 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SpotifyByYear.ViewModels"
+        xmlns:models="using:SpotifyByYear.Models"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="1400" d:DesignHeight="1000"
+        x:Class="SpotifyByYear.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Icon="/Assets/avalonia-logo.ico"
+        Width="1400" Height="1000"
+        WindowStartupLocation="CenterScreen"
+        Title="SpotifyByYear">
+
+    <Design.DataContext>
+        <!-- This only sets the DataContext for the previewer in an IDE,
+             to set the actual DataContext for runtime, set the DataContext property in code (look at App.axaml.cs) -->
+        <vm:MainViewModel />
+    </Design.DataContext>
+
+    <DockPanel Margin="12">
+        <!-- Toolbar -->
+        <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,8">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="Load playlists" Command="{Binding LoadPlaylistsCommand}" />
+                <Button Content="Cancel"
+                        Command="{Binding LoadPlaylistsCancelCommand}"
+                        IsVisible="{Binding LoadPlaylistsCommand.IsRunning}" />
+            </StackPanel>
+            <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <Grid ColumnDefinitions="350,6,*,6,*">
+            <!-- Playlists -->
+            <DockPanel Grid.Column="0">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="16" Margin="0,0,0,4">
+                    <CheckBox Content="Select all" IsChecked="{Binding AllSelected}" />
+                    <TextBlock Text="{Binding SelectionSummary}" VerticalAlignment="Center" />
+                </StackPanel>
+                <ListBox ItemsSource="{Binding Playlists}"
+                         SelectedItem="{Binding SelectedPlaylist}"
+                         BorderBrush="Gray" BorderThickness="1">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PlaylistItemViewModel">
+                            <!-- Checkbox has no content so clicking the name selects the row instead of toggling. -->
+                            <Grid ColumnDefinitions="Auto,*">
+                                <CheckBox Grid.Column="0" IsChecked="{Binding IsSelected}" MinWidth="0" Margin="0,0,8,0" />
+                                <TextBlock Grid.Column="1" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                                    <Run Text="{Binding Name}" />
+                                    <Run Foreground="Gray" Text="{Binding TrackCount, StringFormat='({0})'}" />
+                                </TextBlock>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+
+            <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="Transparent" />
+
+            <!-- Tracks -->
+            <DockPanel Grid.Column="2">
+                <TextBlock DockPanel.Dock="Top" Text="{Binding TracksStatus}" Margin="0,6,0,8" TextTrimming="CharacterEllipsis" />
+                <ListBox ItemsSource="{Binding Tracks}"
+                         SelectedItem="{Binding SelectedTrack}"
+                         BorderBrush="Gray" BorderThickness="1">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="models:PlaylistTrackInfo">
+                            <Grid ColumnDefinitions="40,*">
+                                <TextBlock Grid.Column="0" Foreground="Gray" Text="{Binding Position}" VerticalAlignment="Top" />
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Subtitle}" Foreground="Gray" FontSize="12" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+
+            <GridSplitter Grid.Column="3" ResizeDirection="Columns" Background="Transparent" />
+
+            <!-- Track details -->
+            <DockPanel Grid.Column="4">
+                <TextBlock DockPanel.Dock="Top" Margin="0,6,0,8"
+                           Text="Select a track to see its metadata."
+                           IsVisible="{Binding SelectedTrack, Converter={x:Static ObjectConverters.IsNull}}" />
+                <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,8"
+                            IsVisible="{Binding SelectedTrack, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <SelectableTextBlock Text="{Binding SelectedTrack.Name}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <SelectableTextBlock Text="{Binding SelectedTrack.Artists}" TextWrapping="Wrap" />
+                    <SelectableTextBlock Text="{Binding SelectedTrack.Album}" TextWrapping="Wrap" Foreground="Gray" />
+                    <SelectableTextBlock Text="{Binding SelectedTrack.ReleaseSummary}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" Text="Raw JSON from Spotify" />
+                </StackPanel>
+                <TextBox Text="{Binding SelectedTrack.RawJson}"
+                         IsVisible="{Binding SelectedTrack, Converter={x:Static ObjectConverters.IsNotNull}}"
+                         IsReadOnly="True"
+                         AcceptsReturn="True"
+                         TextWrapping="NoWrap"
+                         FontFamily="Cascadia Mono, Consolas, monospace"
+                         FontSize="12"
+                         VerticalContentAlignment="Top"
+                         ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto" />
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+
+</Window>
