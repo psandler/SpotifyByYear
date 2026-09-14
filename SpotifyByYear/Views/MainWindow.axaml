@@ -1,7 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:SpotifyByYear.ViewModels"
-        xmlns:models="using:SpotifyByYear.Models"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d" d:DesignWidth="1400" d:DesignHeight="1000"
@@ -64,11 +63,11 @@
                          SelectedItem="{Binding SelectedTrack}"
                          BorderBrush="Gray" BorderThickness="1">
                     <ListBox.ItemTemplate>
-                        <DataTemplate x:DataType="models:PlaylistTrackInfo">
+                        <DataTemplate x:DataType="vm:TrackRowViewModel">
                             <Grid ColumnDefinitions="40,*">
-                                <TextBlock Grid.Column="0" Foreground="Gray" Text="{Binding Position}" VerticalAlignment="Top" />
+                                <TextBlock Grid.Column="0" Foreground="Gray" Text="{Binding Info.Position}" VerticalAlignment="Top" />
                                 <StackPanel Grid.Column="1">
-                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Info.Name}" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Text="{Binding Subtitle}" Foreground="Gray" FontSize="12" TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                             </Grid>
@@ -80,19 +79,33 @@
             <GridSplitter Grid.Column="3" ResizeDirection="Columns" Background="Transparent" />
 
             <!-- Track details -->
-            <DockPanel Grid.Column="4">
-                <TextBlock DockPanel.Dock="Top" Margin="0,6,0,8"
+            <Grid Grid.Column="4" RowDefinitions="Auto,Auto,*">
+                <TextBlock Grid.Row="0" Margin="0,6,0,8"
                            Text="Select a track to see its metadata."
                            IsVisible="{Binding SelectedTrack, Converter={x:Static ObjectConverters.IsNull}}" />
-                <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,8"
+
+                <StackPanel Grid.Row="1" Spacing="2" Margin="0,0,0,8"
                             IsVisible="{Binding SelectedTrack, Converter={x:Static ObjectConverters.IsNotNull}}">
-                    <SelectableTextBlock Text="{Binding SelectedTrack.Name}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
-                    <SelectableTextBlock Text="{Binding SelectedTrack.Artists}" TextWrapping="Wrap" />
-                    <SelectableTextBlock Text="{Binding SelectedTrack.Album}" TextWrapping="Wrap" Foreground="Gray" />
-                    <SelectableTextBlock Text="{Binding SelectedTrack.ReleaseSummary}" TextWrapping="Wrap" />
+                    <SelectableTextBlock Text="{Binding SelectedTrack.Info.Name}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <SelectableTextBlock Text="{Binding SelectedTrack.Info.Artists}" TextWrapping="Wrap" />
+                    <SelectableTextBlock Text="{Binding SelectedTrack.Info.Album}" TextWrapping="Wrap" Foreground="Gray" />
+
+                    <SelectableTextBlock Margin="0,8,0,0" Text="{Binding SelectedTrack.ResolvedText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <SelectableTextBlock Text="{Binding SelectedTrack.AlbumDateText}" TextWrapping="Wrap" />
+                    <SelectableTextBlock Text="{Binding SelectedTrack.MusicBrainzText}" TextWrapping="Wrap" />
+                    <SelectableTextBlock Text="{Binding SelectedTrack.SpotifySearchText}" TextWrapping="Wrap" />
+                    <Button Margin="0,4,0,0" Content="Look up again" Command="{Binding LookUpSelectedTrackAgainCommand}" />
+
+                    <Expander Margin="0,8,0,0" Header="Candidates considered" HorizontalAlignment="Stretch">
+                        <SelectableTextBlock Text="{Binding SelectedTrack.CandidatesText}" TextWrapping="Wrap"
+                                             FontFamily="Cascadia Mono, Consolas, monospace" FontSize="12" />
+                    </Expander>
+
                     <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" Text="Raw JSON from Spotify" />
                 </StackPanel>
-                <TextBox Text="{Binding SelectedTrack.RawJson}"
+
+                <TextBox Grid.Row="2"
+                         Text="{Binding SelectedTrack.Info.RawJson}"
                          IsVisible="{Binding SelectedTrack, Converter={x:Static ObjectConverters.IsNotNull}}"
                          IsReadOnly="True"
                          AcceptsReturn="True"
@@ -102,7 +115,7 @@
                          VerticalContentAlignment="Top"
                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
                          ScrollViewer.VerticalScrollBarVisibility="Auto" />
-            </DockPanel>
+            </Grid>
         </Grid>
     </DockPanel>
 

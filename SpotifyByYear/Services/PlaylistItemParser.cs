@@ -49,23 +49,29 @@ public static class PlaylistItemParser
         var isLocal = GetBool(entry, "is_local") || GetBool(item, "is_local");
 
         string artists;
+        string primaryArtist;
         string album;
+        string? albumType;
         string? releaseDate;
         string? precision;
 
         if (type == "episode")
         {
             var show = GetObject(item, "show");
-            artists = GetString(show, "publisher") ?? "";
+            artists = primaryArtist = GetString(show, "publisher") ?? "";
             album = GetString(show, "name") ?? "";
+            albumType = null;
             releaseDate = GetString(item, "release_date");
             precision = GetString(item, "release_date_precision");
         }
         else
         {
-            artists = JoinNames(item, "artists");
+            var artistNames = GetNames(item, "artists");
+            artists = string.Join(", ", artistNames);
+            primaryArtist = artistNames.FirstOrDefault() ?? "";
             var albumElement = GetObject(item, "album");
             album = GetString(albumElement, "name") ?? "";
+            albumType = GetString(albumElement, "album_type");
             releaseDate = GetString(albumElement, "release_date");
             precision = GetString(albumElement, "release_date_precision");
         }
@@ -77,9 +83,13 @@ public static class PlaylistItemParser
         return new PlaylistTrackInfo(
             position,
             type,
+            GetString(item, "id"),
+            GetString(GetObject(item, "external_ids"), "isrc"),
             name,
             artists,
+            primaryArtist,
             album,
+            albumType,
             string.IsNullOrEmpty(releaseDate) ? null : releaseDate,
             precision,
             isLocal,
@@ -100,17 +110,19 @@ public static class PlaylistItemParser
     private static bool GetBool(JsonElement? element, string name) =>
         element is { ValueKind: JsonValueKind.Object } e && e.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
 
-    private static string JoinNames(JsonElement? element, string arrayName)
+    private static List<string> GetNames(JsonElement? element, string arrayName)
     {
         if (element is not { ValueKind: JsonValueKind.Object } e ||
             !e.TryGetProperty(arrayName, out var array) ||
             array.ValueKind != JsonValueKind.Array)
         {
-            return "";
+            return [];
         }
 
-        return string.Join(", ", array.EnumerateArray()
+        return array.EnumerateArray()
             .Select(a => GetString(a, "name"))
-            .Where(n => !string.IsNullOrEmpty(n)));
+            .Where(n => !string.IsNullOrEmpty(n))
+            .Select(n => n!)
+            .ToList();
     }
 }

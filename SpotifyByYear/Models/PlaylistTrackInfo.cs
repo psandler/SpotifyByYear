@@ -9,37 +9,22 @@ namespace SpotifyByYear.Models;
 public sealed record PlaylistTrackInfo(
     int Position,
     string Type,
+    string? TrackId,
+    string? Isrc,
     string Name,
     string Artists,
+    string PrimaryArtist,
     string Album,
+    string? AlbumType,
     string? ReleaseDate,
     string? ReleaseDatePrecision,
     bool IsLocal,
     DateTimeOffset? AddedAt,
     string RawJson)
 {
-    /// <summary>First 4 characters of the release date (dates can be YYYY, YYYY-MM or YYYY-MM-DD).</summary>
-    public string? ReleaseYear => ReleaseDate is { Length: >= 4 } date ? date[..4] : null;
+    /// <summary>Year of the album this copy is on. Not the song's original year for compilations/remasters.</summary>
+    public int? AlbumYear => ReleaseDates.ParseYear(ReleaseDate);
 
-    public string Subtitle
-    {
-        get
-        {
-            var subtitle = $"{Artists} · {ReleaseYear ?? "no year"}";
-            if (IsLocal)
-            {
-                subtitle += " · local file";
-            }
-            else if (Type != "track")
-            {
-                subtitle += $" · {Type}";
-            }
-
-            return subtitle;
-        }
-    }
-
-    public string ReleaseSummary => ReleaseDate is null
-        ? "No release date"
-        : $"Released {ReleaseDate} (precision: {ReleaseDatePrecision ?? "unknown"}) → year {ReleaseYear}";
+    /// <summary>Only regular Spotify tracks can be looked up in MusicBrainz / Spotify search.</summary>
+    public bool CanResolveYear => Type == "track" && !IsLocal && TrackId is not null;
 }

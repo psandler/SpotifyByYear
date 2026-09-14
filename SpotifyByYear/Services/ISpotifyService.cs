@@ -22,4 +22,7 @@ public interface ISpotifyService
 
     /// <summary>Every entry in a playlist (all pages), including the raw JSON for each.</summary>
     Task<IReadOnlyList<PlaylistTrackInfo>> GetPlaylistItemsAsync(string playlistId, CancellationToken cancellationToken);
+
+    /// <summary>Track search by title and artist (one page; Dev Mode caps search at 10 results).</summary>
+    Task<IReadOnlyList<SpotifySearchHit>> SearchTracksAsync(string title, string artist, CancellationToken cancellationToken);
 }

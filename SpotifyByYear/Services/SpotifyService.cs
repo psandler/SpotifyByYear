@@ -67,9 +67,18 @@ public sealed class SpotifyService : ISpotifyService
             throw new InvalidOperationException("Not connected to Spotify.");
         }
 
-        var firstPage = await _client.Playlists.CurrentUsers(
-            new PlaylistCurrentUsersRequest { Limit = 50 }, cancellationToken);
-        var all = await _client.PaginateAll(firstPage, cancellationToken: cancellationToken);
+        IList<FullPlaylist> all;
+        await _requestLock.WaitAsync(cancellationToken);
+        try
+        {
+            var firstPage = await _client.Playlists.CurrentUsers(
+                new PlaylistCurrentUsersRequest { Limit = 50 }, cancellationToken);
+            all = await _client.PaginateAll(firstPage, cancellationToken: cancellationToken);
+        }
+        finally
+        {
+            _requestLock.Release();
+        }
 
         return all
             .Where(p => p.Id is not null && p.Owner?.Id == _currentUser.Id)
@@ -121,6 +130,42 @@ public sealed class SpotifyService : ISpotifyService
         }
 
         return results;
+    }
+
+    public async Task<IReadOnlyList<SpotifySearchHit>> SearchTracksAsync(
+        string title, string artist, CancellationToken cancellationToken)
+    {
+        if (_client is null)
+        {
+            throw new InvalidOperationException("Not connected to Spotify.");
+        }
+
+        // Field filters narrow the 10 results to the right song; quotes inside values would break the phrase.
+        var query = $"track:\"{title.Replace("\"", " ")}\" artist:\"{artist.Replace("\"", " ")}\"";
+
+        SearchResponse response;
+        await _requestLock.WaitAsync(cancellationToken);
+        try
+        {
+            response = await _client.Search.Item(
+                new SearchRequest(SearchRequest.Types.Track, query) { Limit = 10 }, cancellationToken);
+        }
+        finally
+        {
+            _requestLock.Release();
+        }
+
+        return (response.Tracks?.Items ?? [])
+            .Where(t => t is not null)
+            .Select(t => new SpotifySearchHit(
+                t.Id,
+                t.Name ?? "",
+                t.Artists?.Select(a => a.Name).Where(n => n is not null).ToList() ?? [],
+                t.Album?.Id,
+                t.Album?.Name ?? "",
+                t.Album?.AlbumType,
+                t.Album?.ReleaseDate))
+            .ToList();
     }
 
     private async Task CreateClientAsync(SpotifySettings settings, PKCETokenResponse token, CancellationToken cancellationToken)

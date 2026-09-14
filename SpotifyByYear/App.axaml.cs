@@ -18,10 +18,12 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new MainWindow
-            {
-                DataContext = new MainViewModel(new SpotifyService(new TokenStore())),
-            };
+            var spotify = new SpotifyService(new TokenStore());
+            var resolver = new ReleaseYearResolver(new ReleaseYearCache(), new MusicBrainzClient(), spotify);
+            var viewModel = new MainViewModel(spotify, resolver);
+
+            desktop.MainWindow = new MainWindow { DataContext = viewModel };
+            desktop.ShutdownRequested += (_, _) => viewModel.FlushCaches();
         }
 
         base.OnFrameworkInitializationCompleted();

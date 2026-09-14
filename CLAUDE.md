@@ -13,7 +13,13 @@ Guidance for Claude Code when working in this repository.
 SpotifyByYear is a desktop app that reads the user's own Spotify playlists and builds new playlists grouped by **track release year**.
 
 - Sources: all playlists the **user owns**. More sources and features are TBD; the user will explain them as we go.
-- "Year" means the song's **original** release year. **Unresolved:** Spotify only provides `album.release_date` (formats `YYYY`, `YYYY-MM`, `YYYY-MM-DD`; see `release_date_precision`), which is the date of the album this copy is on. It's wrong for compilations and remasters (e.g. "Rich Girl" → 2010 instead of 1977). Don't build grouping logic on it until the approach in documents/TODO.md is decided.
+- "Year" means the song's **original** release year. Spotify only provides `album.release_date` (the album this copy is on), which is wrong for compilations and remasters (e.g. "Rich Girl" shows 2010 instead of 1976). `ReleaseYearResolver` works out the real year:
+  1. Manual override from `year-overrides.json` always wins.
+  2. MusicBrainz: ISRC lookup; recording search (limit 100, skip live/demo/etc. disambiguations, score ≥ 90) when ISRC has no match or the Spotify title has version text ("- 2011 Remaster"). Earliest `first-release-date` wins.
+  3. Spotify search (every track): earliest non-compilation album with a matching title and artist. Used when MusicBrainz has no match.
+  4. The playlist copy's album year is an upper bound (a song can't come out after an album containing it).
+- Both sources are always checked and stored so disagreements are visible. Bump `ReleaseYearResolver.LogicVersion` when matching rules change.
+- MusicBrainz: ≤ 1 request/second (`MusicBrainzClient` enforces 1.1 s spacing, retries 503), User-Agent `SpotifyByYear/0.1 ( https://github.com/psandler/SpotifyByYear )`.
 - Skip local files (`is_local`) and podcast episodes. They have no usable release year.
 
 The work plan and decisions are in [documents/TODO.md](documents/TODO.md). Keep it current: check off finished items and add new ones as they come up.
@@ -67,4 +73,6 @@ documents/        planning docs (TODO.md)
 
 - Spotify Client ID: `SpotifyByYear/appsettings.Local.json` (git-ignored, copied to the build output). `appsettings.Local.example.json` is the committed template. It's not secret under PKCE, but it's personal, so keep it out of the repo.
 - Token (incl. refresh token): `%LOCALAPPDATA%\SpotifyByYear\token.json` (`TokenStore`), never inside the repo. Delete it to force a fresh sign-in.
+- Release-year cache: `%LOCALAPPDATA%\SpotifyByYear\release-years.json` (`ReleaseYearCache`, safe to delete). Manual corrections: `year-overrides.json` in the same folder, format `{ "overrides": { "<spotify track id>": { "year": 1977, "note": "..." } } }`. Never delete the overrides file.
+- Don't launch the GUI app without asking the user first. Verify with `dotnet build` and headless scratch harnesses.
 - OAuth callback: `LoopbackCallbackListener` (raw `TcpListener` on 127.0.0.1). Don't switch to `HttpListener`, which needs a URL ACL/admin rights to bind 127.0.0.1 on Windows.
