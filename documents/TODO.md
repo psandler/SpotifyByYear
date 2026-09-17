@@ -13,11 +13,11 @@ Goal: a desktop app (Avalonia) that reads my Spotify playlists and builds new pl
 - [x] Add `.gitignore` (standard .NET, plus local secrets/token files)
 - [x] Add `.editorconfig` (default `dotnet new editorconfig` style)
 - [x] Create `CLAUDE.md` (project overview, build/run commands, conventions, Spotify API gotchas, no-git-writes rule)
-- [ ] Add `README.md` (what it is, how to set up a Spotify app, how to run)
+- [x] Add `README.md` (what it is, how the year is worked out, Spotify app setup, build/run, tests, where data is stored)
 - [x] **(Human)** Initial commit
 - [x] **(Human)** Create GitHub repo and push (https://github.com/psandler/SpotifyByYear)
-- [x] Add a test project (`SpotifyByYear.Tests`, xUnit v3): 135 offline unit tests with fakes; 2 live MusicBrainz/Spotify tests opt-in via `SPOTIFYBYYEAR_LIVE_TESTS=1`. `global.json` opts into Microsoft.Testing.Platform (`dotnet test --solution SpotifyByYear.slnx`)
-- [ ] **(Human)** Confirm `dotnet test --solution SpotifyByYear.slnx` and Visual Studio's Test Explorer work with the app closed
+- [x] Add a test project (`SpotifyByYear.Tests`, xUnit v3): offline unit tests with fakes; 2 live MusicBrainz/Spotify tests opt-in via `SPOTIFYBYYEAR_LIVE_TESTS=1`. `global.json` opts into Microsoft.Testing.Platform (`dotnet test --solution SpotifyByYear.slnx`)
+- [x] **(Human)** Confirm `dotnet test --solution SpotifyByYear.slnx` works with the app closed
 - [x] Disable the Aikido plugin for this project only (`.claude/settings.json` → `enabledPlugins`)
 - [ ] (Optional) Connect Claude Code to Visual Studio 2026 (community extension, see notes below)
 
@@ -26,51 +26,41 @@ Goal: a desktop app (Avalonia) that reads my Spotify playlists and builds new pl
 - [x] Confirm the Spotify account that owns the app has Premium (required for Development Mode apps since Feb 2026)
 - [x] **(Human)** Register an app in the Spotify Developer Dashboard (API: Web API) and get the Client ID
 - [x] **(Human)** Add the redirect URI `http://127.0.0.1:5543/callback` to the app (`localhost` is not allowed)
-- [x] Create `SpotifyByYear/appsettings.Local.json` with the Client ID (git-ignored)
-- [x] Client ID supplied via `SpotifyByYear/appsettings.Local.json` (git-ignored, copied to the build output)
+- [x] Create `SpotifyByYear/appsettings.Local.json` with the Client ID (git-ignored, copied to the build output)
 - [x] Token (incl. refresh token) stored at `%LOCALAPPDATA%\SpotifyByYear\token.json`
 
 ## Technical decisions
 
 - [x] Auth flow: Authorization Code with PKCE (desktop app, no client secret needed)
 - [x] Spotify client: **SpotifyAPI-NET** (`SpotifyAPI.Web` 7.4.2). Feb 2026 support arrived in 7.3.0, and 7.4.x added `ReplacePlaylistItems`.
-- [x] Added `SpotifyAPI.Web`. The OAuth callback uses our own small `TcpListener` on 127.0.0.1 (`LoopbackCallbackListener`), not `SpotifyAPI.Web.Auth` or `HttpListener` (which needs admin rights for 127.0.0.1 on Windows)
+- [x] The OAuth callback uses our own small `TcpListener` on 127.0.0.1 (`LoopbackCallbackListener`), not `SpotifyAPI.Web.Auth` or `HttpListener` (which needs admin rights for 127.0.0.1 on Windows)
 - [x] Scopes requested: playlist read private/collaborative + modify private/public (so creating playlists later won't need a second sign-in)
-- [x] "Year" = **track release year** (album `release_date`, first 4 chars). More detail to come with features.
+- [x] Sources: **all playlists I own**. Other features TBD.
+- [x] "Year" = the song's **original** release year, not the album date Spotify gives (see the decision below)
 - [x] **DECIDED:** MusicBrainz (ISRC, then search) first; Spotify search on every track as a second opinion and fallback; album year as an upper bound; manual overrides win. Results cached in `%LOCALAPPDATA%\SpotifyByYear\release-years.json` (JSON), overrides in `year-overrides.json`. See CLAUDE.md.
-- [x] Explorer shows resolved year + source, MusicBrainz result, Spotify search result, candidates, "Look up again"
-- [ ] Verify matching quality on real playlists; tune `TrackMatching` rules (bump `LogicVersion`)
-  - First headless sample (11 tracks): all plausible; MusicBrainz and Spotify search agreed on every track where both answered
-  - Library stats: 899 unique tracks, 172 on compilations, 173 with version text, 0 without ISRC
-  - Cold lookups took ~6.5 s/track in the sample (one included 503 retries), so a full first run could be 1+ hour. Needs a background pass that can resume.
+  - Background: Spotify has no original-release field; `album.release_date` is the date of the album this copy is on, so compilations/remasters give the wrong year (e.g. "Rich Girl" shows 2010 from *70s 100 Hits*; the song is from 1976). The ISRC year code isn't it either (`USRC19206280` → 1992 registration). Discogs (token, 60 requests/min) was the other option considered.
   - [x] **Decided:** re-recordings like "All Too Well (Taylor's Version)" use the *original* song's year (2012)
   - [x] **Decided:** live versions use the *live recording's* date, not the studio original (`LogicVersion` 2)
 - [x] MusicBrainz 503 handling: longer backoff (5/10/15 s or `Retry-After`) that pauses all MusicBrainz requests
-- [ ] UI for setting a manual year override (for now: hand-edit `year-overrides.json`)
 - [x] Resolve years for the whole library in the background after playlists load (every owned playlist, each song once), with progress, an estimate, and a stop button. A clicked track jumps the queue.
-- [x] ~~OPEN — album date ≠ original release date.~~ Background: Spotify has no original-release field; `album.release_date` is the date of the album this copy is on. Compilations/remasters give the wrong year (e.g. "Rich Girl" shows 2010 from *70s 100 Hits*; the song is from 1977). The ISRC year code isn't it either (`USRC19206280` → 1992 registration). Options:
-  - Spotify search for the same title + artist, take the earliest non-compilation album date (search limit is 10 per page in Dev Mode; one search per song)
-  - MusicBrainz lookup by ISRC (`first-release-date`), falling back to title + artist search (free, no key, 1 request/sec, needs a User-Agent)
-  - Discogs API (needs a token, 60 requests/min)
-  - Cache results locally so each song is looked up once; allow manual overrides
-- [x] Sources: **all playlists I own**. Other features TBD.
-- [ ] Naming convention for generated playlists (e.g. `2019 — By Year`)
-- [ ] Re-run behavior: update existing year playlists, skip duplicates, or recreate from scratch
+- [ ] Verify matching quality on real playlists once the full library is cached; tune `TrackMatching` rules (bump `LogicVersion`)
+  - First sample (11 tracks): all plausible; MusicBrainz and Spotify search agreed on every track where both answered
+  - Library stats: 899 unique tracks, 172 on compilations, 173 with version text, 0 without ISRC
+  - Cold lookups took ~6.5 s/track in the sample (one included 503 retries), so the first full run may take 30–90 minutes
+- [ ] UI for setting a manual year override (for now: hand-edit `year-overrides.json`)
 
 ## Features (first pass)
 
-- [x] Sign in with Spotify (browser opens, app catches the callback, tokens saved). Code done; **needs a real test once the Client ID is set up**
+- [x] Sign in with Spotify (browser opens, app catches the callback, tokens saved), verified with a real account
 - [x] List my playlists in the UI (owned only, alphabetical, checkboxes, tri-state "Select all", "N of M selected")
-- [x] Sign-in verified with a real account
 - [x] API explorer: click a playlist → its tracks (all pages, cached per playlist); click a track → key fields + full raw JSON of the playlist item
 - [x] Bug: "String is empty or null (Parameter 'refreshToken')". A token refresh without a new refresh token was saved as-is, wiping the refresh token. Now the previous refresh token is kept, and an unrefreshable saved token falls back to browser sign-in.
+- [x] Progress reporting (library-wide year lookup) and rate-limit handling (Spotify 429 `Retry-After` via the library's retry handler; MusicBrainz 503 backoff)
+- [x] Error messages in the status lines instead of crashes
+- [ ] Load tracks from the playlists ticked in the list (handle paging). Paging is done; the checkboxes don't drive anything yet.
 - [ ] Auto-connect on startup when a saved token exists
 - [ ] Keep checkbox selections when reloading the list
-- [ ] Load tracks from the selected playlists (handle paging)
-- [ ] Group tracks by year and show a preview (year → track count)
-- [ ] Create or update the year playlists (batch adds of 100 items per request)
-- [ ] Progress reporting and rate-limit handling (HTTP 429 `Retry-After`)
-- [ ] Error handling and sign-out
+- [ ] Sign-out (clear the saved login)
 
 ## Spotify API notes (as of Feb/Mar 2026 changes)
 
