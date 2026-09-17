@@ -64,6 +64,10 @@ public partial class TrackRowViewModel : ViewModelBase
             }
 
             var text = $"Original release year: {Resolution.Year?.ToString() ?? "unknown"} (from {Resolution.Source})";
+            if (Resolution.Entry.IsLiveVersion)
+            {
+                text += " · live version: uses the live recording's date";
+            }
             if (Resolution.Override?.Note is { Length: > 0 } note)
             {
                 text += $" · note: {note}";

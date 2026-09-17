@@ -14,9 +14,10 @@ public sealed record SpotifySettings(string ClientId, Uri RedirectUri)
 
     private static readonly Uri DefaultRedirectUri = new("http://127.0.0.1:5543/callback");
 
-    public static SpotifySettings Load()
+    /// <param name="directory">Folder containing the settings file; defaults to the app's folder.</param>
+    public static SpotifySettings Load(string? directory = null)
     {
-        var path = Path.Combine(AppContext.BaseDirectory, FileName);
+        var path = Path.Combine(directory ?? AppContext.BaseDirectory, FileName);
         if (!File.Exists(path))
         {
             throw new InvalidOperationException(

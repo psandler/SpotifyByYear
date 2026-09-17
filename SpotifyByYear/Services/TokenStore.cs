@@ -11,10 +11,15 @@ namespace SpotifyByYear.Services;
 /// </summary>
 public sealed class TokenStore
 {
-    private readonly string _path = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "SpotifyByYear",
-        "token.json");
+    private readonly string _path;
+
+    /// <param name="directory">Folder for token.json; defaults to <c>%LOCALAPPDATA%\SpotifyByYear</c>.</param>
+    public TokenStore(string? directory = null)
+    {
+        directory ??= Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SpotifyByYear");
+        _path = Path.Combine(directory, "token.json");
+    }
 
     public PKCETokenResponse? Load()
     {

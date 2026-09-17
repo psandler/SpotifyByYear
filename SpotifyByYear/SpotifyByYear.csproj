@@ -11,6 +11,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="SpotifyByYear.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Local, git-ignored settings (Spotify Client ID). Copy appsettings.Local.example.json to create it. -->
     <None Update="appsettings.Local.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

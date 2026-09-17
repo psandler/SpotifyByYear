@@ -1,3 +1,4 @@
 <Solution>
+  <Project Path="SpotifyByYear.Tests/SpotifyByYear.Tests.csproj" />
   <Project Path="SpotifyByYear/SpotifyByYear.csproj" />
 </Solution>

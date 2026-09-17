@@ -13,6 +13,12 @@ public sealed class ReleaseYearEntry
     public string? AlbumReleaseDate { get; set; }
     public string? AlbumType { get; set; }
 
+    /// <summary>The title marks this copy as live; the live recording's date is wanted, not the studio original's.</summary>
+    public bool IsLiveVersion { get; set; }
+
+    /// <summary>Year written in a live title ("… / 2007"), if any.</summary>
+    public int? TitleYear { get; set; }
+
     /// <summary>Matching-logic version that produced this entry; older entries are looked up again.</summary>
     public int LogicVersion { get; set; }
 
@@ -67,6 +73,7 @@ public sealed record ResolvedReleaseYear(ReleaseYearEntry Entry, YearOverride? O
 
         (int? Year, string Source) best =
             Entry.MusicBrainz?.Year is int mb ? (mb, "MusicBrainz")
+            : Entry.IsLiveVersion && Entry.TitleYear is int titleYear ? (titleYear, "year in live title")
             : Entry.SpotifySearch?.Year is int sp ? (sp, "Spotify search")
             : (null, "none");
 

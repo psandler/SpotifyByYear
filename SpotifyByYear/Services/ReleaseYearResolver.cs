@@ -16,18 +16,18 @@ namespace SpotifyByYear.Services;
 public sealed class ReleaseYearResolver
 {
     /// <summary>Bump when matching rules change so cached entries are looked up again.</summary>
-    public const int LogicVersion = 1;
+    public const int LogicVersion = 2; // 2: live versions use the live recording's date
 
     private static readonly TimeSpan NoMatchRetryAfter = TimeSpan.FromDays(30);
     private const int SaveEvery = 25;
     private const int MaxCandidates = 10;
 
     private readonly ReleaseYearCache _cache;
-    private readonly MusicBrainzClient _musicBrainz;
+    private readonly IMusicBrainzClient _musicBrainz;
     private readonly ISpotifyService _spotify;
     private int _unsavedLookups;
 
-    public ReleaseYearResolver(ReleaseYearCache cache, MusicBrainzClient musicBrainz, ISpotifyService spotify)
+    public ReleaseYearResolver(ReleaseYearCache cache, IMusicBrainzClient musicBrainz, ISpotifyService spotify)
     {
         _cache = cache;
         _musicBrainz = musicBrainz;
@@ -103,28 +103,43 @@ public sealed class ReleaseYearResolver
     {
         try
         {
+            var isLive = TrackMatching.IsLiveVersion(track.Name);
+            var liveYear = TrackMatching.LiveYearFromTitle(track.Name);
             var matches = new List<(MusicBrainzRecording Recording, string Method)>();
 
             if (!string.IsNullOrEmpty(track.Isrc))
             {
+                // The ISRC identifies this exact recording, so a live copy may match a live recording.
                 var byIsrc = await _musicBrainz.LookupByIsrcAsync(track.Isrc, cancellationToken);
                 matches.AddRange(byIsrc
-                    .Where(r => TrackMatching.TitlesMatch(r.Title, track.Name) && !TrackMatching.IsAlternateVersion(r.Disambiguation))
+                    .Where(r => TrackMatching.TitlesMatch(r.Title, track.Name) &&
+                                (isLive || !TrackMatching.IsAlternateVersion(r.Disambiguation)))
                     .Select(r => (r, "isrc")));
             }
 
-            // Search when the ISRC gave nothing usable, or when this copy is a remaster/live/etc.
-            // (those often have their own MusicBrainz recording with a later date).
-            if (!matches.Any(m => HasYear(m.Recording)) || TrackMatching.HasVersionDecoration(track.Name))
+            // Search when the ISRC gave nothing usable, or when a non-live copy is a remaster/mix/etc.
+            // (those often have their own MusicBrainz recording with a later date than the original).
+            if (!matches.Any(m => HasYear(m.Recording)) || (!isLive && TrackMatching.HasVersionDecoration(track.Name)))
             {
                 var bySearch = await _musicBrainz.SearchRecordingsAsync(
                     TrackMatching.CleanTitle(track.Name), track.PrimaryArtist, cancellationToken);
-                matches.AddRange(bySearch
+                var sameSong = bySearch
                     .Where(r => (r.Score ?? 0) >= 90 &&
                                 TrackMatching.TitlesMatch(r.Title, track.Name) &&
-                                TrackMatching.ArtistsMatch(track.PrimaryArtist, r.Artist) &&
-                                !TrackMatching.IsAlternateVersion(r.Disambiguation))
-                    .Select(r => (r, "search")));
+                                TrackMatching.ArtistsMatch(track.PrimaryArtist, r.Artist))
+                    .ToList();
+
+                matches.AddRange(isLive
+                    // The earliest live recording could be any concert, so only accept one from the year in the title.
+                    ? sameSong
+                        .Where(r => TrackMatching.IsLiveDisambiguation(r.Disambiguation) &&
+                                    liveYear is int year &&
+                                    (ReleaseDates.ParseYear(r.FirstReleaseDate) == year ||
+                                     r.Disambiguation!.Contains($"{year}", StringComparison.Ordinal)))
+                        .Select(r => (r, "search"))
+                    : sameSong
+                        .Where(r => !TrackMatching.IsAlternateVersion(r.Disambiguation))
+                        .Select(r => (r, "search")));
             }
 
             var ordered = matches
@@ -166,13 +181,15 @@ public sealed class ReleaseYearResolver
     {
         try
         {
+            // Live copies search for the live track itself (full title), not the studio song.
+            var isLive = TrackMatching.IsLiveVersion(track.Name);
             var hits = await _spotify.SearchTracksAsync(
-                TrackMatching.CleanTitle(track.Name), track.PrimaryArtist, cancellationToken);
+                isLive ? track.Name : TrackMatching.CleanTitle(track.Name), track.PrimaryArtist, cancellationToken);
 
             var ordered = hits
                 .Where(h => ReleaseDates.ParseYear(h.ReleaseDate) is not null &&
                             h.AlbumType != "compilation" &&
-                            TrackMatching.TitlesMatch(h.Name, track.Name) &&
+                            (isLive ? TrackMatching.TitlesMatchExactly(h.Name, track.Name) : TrackMatching.TitlesMatch(h.Name, track.Name)) &&
                             h.Artists.Any(a => TrackMatching.ArtistsMatch(track.PrimaryArtist, a)))
                 .OrderBy(h => h.ReleaseDate, StringComparer.Ordinal)
                 .ToList();
@@ -226,5 +243,7 @@ public sealed class ReleaseYearResolver
         entry.Artists = track.Artists;
         entry.AlbumReleaseDate = track.ReleaseDate;
         entry.AlbumType = track.AlbumType;
+        entry.IsLiveVersion = TrackMatching.IsLiveVersion(track.Name);
+        entry.TitleYear = TrackMatching.LiveYearFromTitle(track.Name);
     }
 }

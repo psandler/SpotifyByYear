@@ -14,16 +14,18 @@ Goal: a desktop app (Avalonia) that reads my Spotify playlists and builds new pl
 - [x] Add `.editorconfig` (default `dotnet new editorconfig` style)
 - [x] Create `CLAUDE.md` (project overview, build/run commands, conventions, Spotify API gotchas, no-git-writes rule)
 - [ ] Add `README.md` (what it is, how to set up a Spotify app, how to run)
-- [ ] **(Human)** Initial commit
-- [ ] **(Human)** Create GitHub repo and push
-- [ ] (Optional) Add a test project (`SpotifyByYear.Tests`, xUnit) for the year-grouping logic
+- [x] **(Human)** Initial commit
+- [x] **(Human)** Create GitHub repo and push (https://github.com/psandler/SpotifyByYear)
+- [x] Add a test project (`SpotifyByYear.Tests`, xUnit v3): 135 offline unit tests with fakes; 2 live MusicBrainz/Spotify tests opt-in via `SPOTIFYBYYEAR_LIVE_TESTS=1`. `global.json` opts into Microsoft.Testing.Platform (`dotnet test --solution SpotifyByYear.slnx`)
+- [ ] **(Human)** Confirm `dotnet test --solution SpotifyByYear.slnx` and Visual Studio's Test Explorer work with the app closed
+- [x] Disable the Aikido plugin for this project only (`.claude/settings.json` → `enabledPlugins`)
 - [ ] (Optional) Connect Claude Code to Visual Studio 2026 (community extension, see notes below)
 
 ## Spotify developer setup
 
 - [x] Confirm the Spotify account that owns the app has Premium (required for Development Mode apps since Feb 2026)
 - [x] **(Human)** Register an app in the Spotify Developer Dashboard (API: Web API) and get the Client ID
-- [ ] **(Human)** Add the redirect URI `http://127.0.0.1:5543/callback` to the app (`localhost` is not allowed)
+- [x] **(Human)** Add the redirect URI `http://127.0.0.1:5543/callback` to the app (`localhost` is not allowed)
 - [x] Create `SpotifyByYear/appsettings.Local.json` with the Client ID (git-ignored)
 - [x] Client ID supplied via `SpotifyByYear/appsettings.Local.json` (git-ignored, copied to the build output)
 - [x] Token (incl. refresh token) stored at `%LOCALAPPDATA%\SpotifyByYear\token.json`
@@ -41,11 +43,11 @@ Goal: a desktop app (Avalonia) that reads my Spotify playlists and builds new pl
   - First headless sample (11 tracks): all plausible; MusicBrainz and Spotify search agreed on every track where both answered
   - Library stats: 899 unique tracks, 172 on compilations, 173 with version text, 0 without ISRC
   - Cold lookups took ~6.5 s/track in the sample (one included 503 retries), so a full first run could be 1+ hour. Needs a background pass that can resume.
-  - [ ] **Decide:** re-recordings like "All Too Well (Taylor's Version)" currently resolve to the *original* song's year (2012), not the re-recording (2021)
-  - [ ] **Decide:** live versions resolve to the studio original's year (e.g. "Valerie - Live At BBC Radio 1…")
+  - [x] **Decided:** re-recordings like "All Too Well (Taylor's Version)" use the *original* song's year (2012)
+  - [x] **Decided:** live versions use the *live recording's* date, not the studio original (`LogicVersion` 2)
 - [x] MusicBrainz 503 handling: longer backoff (5/10/15 s or `Retry-After`) that pauses all MusicBrainz requests
 - [ ] UI for setting a manual year override (for now: hand-edit `year-overrides.json`)
-- [ ] Resolve years for all selected playlists in the background (not just the one being viewed)
+- [x] Resolve years for the whole library in the background after playlists load (every owned playlist, each song once), with progress, an estimate, and a stop button. A clicked track jumps the queue.
 - [x] ~~OPEN — album date ≠ original release date.~~ Background: Spotify has no original-release field; `album.release_date` is the date of the album this copy is on. Compilations/remasters give the wrong year (e.g. "Rich Girl" shows 2010 from *70s 100 Hits*; the song is from 1977). The ISRC year code isn't it either (`USRC19206280` → 1992 registration). Options:
   - Spotify search for the same title + artist, take the earliest non-compilation album date (search limit is 10 per page in Dev Mode; one search per song)
   - MusicBrainz lookup by ISRC (`first-release-date`), falling back to title + artist search (free, no key, 1 request/sec, needs a User-Agent)
@@ -61,6 +63,7 @@ Goal: a desktop app (Avalonia) that reads my Spotify playlists and builds new pl
 - [x] List my playlists in the UI (owned only, alphabetical, checkboxes, tri-state "Select all", "N of M selected")
 - [x] Sign-in verified with a real account
 - [x] API explorer: click a playlist → its tracks (all pages, cached per playlist); click a track → key fields + full raw JSON of the playlist item
+- [x] Bug: "String is empty or null (Parameter 'refreshToken')". A token refresh without a new refresh token was saved as-is, wiping the refresh token. Now the previous refresh token is kept, and an unrefreshable saved token falls back to browser sign-in.
 - [ ] Auto-connect on startup when a saved token exists
 - [ ] Keep checkbox selections when reloading the list
 - [ ] Load tracks from the selected playlists (handle paging)

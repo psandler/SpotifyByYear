@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,6 +17,10 @@ public partial class MainViewModel : ViewModelBase
     private readonly ISpotifyService _spotify;
     private readonly ReleaseYearResolver _resolver;
     private readonly Dictionary<string, IReadOnlyList<PlaylistTrackInfo>> _tracksCache = new();
+
+    // Track ids being looked up right now, so the library pass and a clicked track don't duplicate work.
+    private readonly HashSet<string> _inFlightLookups = [];
+
     private CancellationTokenSource? _tracksCts;
     private bool _isBulkUpdating;
 
@@ -41,6 +46,9 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     public partial string StatusText { get; set; } = "Not connected. Click \"Load playlists\" to sign in to Spotify.";
+
+    [ObservableProperty]
+    public partial string YearsStatus { get; set; } = "";
 
     [ObservableProperty]
     public partial PlaylistItemViewModel? SelectedPlaylist { get; set; }
@@ -119,40 +127,113 @@ public partial class MainViewModel : ViewModelBase
         catch (OperationCanceledException)
         {
             StatusText = "Cancelled.";
+            return;
         }
         catch (Exception ex)
         {
             StatusText = $"Error: {ex.Message}";
+            return;
+        }
+
+        // Look up release years for the whole library in the background. Does nothing while a pass
+        // is already running, and that pass covers the same tracks anyway.
+        ResolveAllYearsCommand.Execute(null);
+    }
+
+    /// <summary>Looks up the release year of every track in every owned playlist, skipping cached ones.</summary>
+    [RelayCommand(IncludeCancelCommand = true)]
+    private async Task ResolveAllYearsAsync(CancellationToken cancellationToken)
+    {
+        if (Playlists.Count == 0)
+        {
+            YearsStatus = "Load playlists first.";
+            return;
+        }
+
+        var tracks = new List<PlaylistTrackInfo>();
+        var done = 0;
+
+        try
+        {
+            var seen = new HashSet<string>();
+            for (var i = 0; i < Playlists.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                YearsStatus = $"Reading playlists… ({i + 1}/{Playlists.Count})";
+                foreach (var track in await GetPlaylistTracksAsync(Playlists[i], cancellationToken))
+                {
+                    // The same song in several playlists is only looked up once.
+                    if (track.CanResolveYear && seen.Add(track.TrackId!))
+                    {
+                        tracks.Add(track);
+                    }
+                }
+            }
+
+            done = tracks.Count(t => _resolver.TryGetCached(t) is not null);
+            YearsStatus = Progress(done, tracks.Count, TimeSpan.Zero, lookedUp: 0);
+
+            var stopwatch = Stopwatch.StartNew();
+            var lookedUp = 0;
+            foreach (var track in tracks)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (_resolver.TryGetCached(track) is { } cached)
+                {
+                    ApplyResolution(track.TrackId!, cached);
+                    continue;
+                }
+
+                await ResolveTrackAsync(track, force: false, cancellationToken);
+                lookedUp++;
+                done++;
+                YearsStatus = Progress(done, tracks.Count, stopwatch.Elapsed, lookedUp);
+            }
+
+            YearsStatus = $"Release years: {tracks.Count} songs done.";
+        }
+        catch (OperationCanceledException)
+        {
+            YearsStatus = $"Release years: stopped at {done} of {tracks.Count} songs. \"Look up all years\" continues where it left off.";
+        }
+        catch (Exception ex)
+        {
+            YearsStatus = $"Release year lookup failed: {ex.Message}";
+        }
+        finally
+        {
+            _resolver.Flush();
         }
     }
 
     [RelayCommand]
     private async Task LookUpSelectedTrackAgainAsync()
     {
-        if (SelectedTrack is not { Info.CanResolveYear: true } row || row.IsResolving)
+        if (SelectedTrack is not { Info.CanResolveYear: true } row)
         {
             return;
         }
 
-        await ResolveRowAsync(row, force: true, CancellationToken.None);
+        await ResolveTrackAsync(row.Info, force: true, CancellationToken.None);
         _resolver.Flush();
     }
 
     // Both handlers catch their own exceptions, so the discarded tasks can't fault unobserved.
     partial void OnSelectedPlaylistChanged(PlaylistItemViewModel? value) => _ = LoadTracksAsync(value);
 
-    // The clicked track jumps ahead of the playlist's lookup loop.
+    // A clicked track jumps ahead of the library pass.
     partial void OnSelectedTrackChanged(TrackRowViewModel? value)
     {
-        if (value is { Resolution: null, IsResolving: false, Info.CanResolveYear: true })
+        if (value is { Resolution: null, Info.CanResolveYear: true })
         {
-            _ = ResolveRowAsync(value, force: false, _tracksCts?.Token ?? CancellationToken.None);
+            _ = ResolveTrackAsync(value.Info, force: false, _tracksCts?.Token ?? CancellationToken.None);
         }
     }
 
     private async Task LoadTracksAsync(PlaylistItemViewModel? playlist)
     {
-        // Clicking another playlist abandons the previous load and its lookups.
+        // Clicking another playlist abandons the previous load.
         _tracksCts?.Cancel();
         var cts = new CancellationTokenSource();
         _tracksCts = cts;
@@ -168,14 +249,8 @@ public partial class MainViewModel : ViewModelBase
 
         try
         {
-            var id = playlist.Playlist.Id;
-            if (!_tracksCache.TryGetValue(id, out var tracks))
-            {
-                TracksStatus = $"Loading {playlist.Name}…";
-                tracks = await _spotify.GetPlaylistItemsAsync(id, cts.Token);
-                _tracksCache[id] = tracks;
-            }
-
+            TracksStatus = $"Loading {playlist.Name}…";
+            var tracks = await GetPlaylistTracksAsync(playlist, cts.Token);
             if (cts.IsCancellationRequested)
             {
                 return;
@@ -186,7 +261,7 @@ public partial class MainViewModel : ViewModelBase
                 Tracks.Add(new TrackRowViewModel(track) { Resolution = _resolver.TryGetCached(track) });
             }
 
-            await ResolvePlaylistYearsAsync(playlist.Name, cts.Token);
+            TracksStatus = $"{playlist.Name}: {tracks.Count} items";
         }
         catch (OperationCanceledException)
         {
@@ -199,58 +274,83 @@ public partial class MainViewModel : ViewModelBase
                 TracksStatus = $"Error loading {playlist.Name}: {ex.Message}";
             }
         }
-        finally
-        {
-            _resolver.Flush();
-        }
     }
 
-    private async Task ResolvePlaylistYearsAsync(string playlistName, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<PlaylistTrackInfo>> GetPlaylistTracksAsync(
+        PlaylistItemViewModel playlist, CancellationToken cancellationToken)
     {
-        var rows = Tracks.ToList();
-
-        void UpdateStatus(bool done)
+        var id = playlist.Playlist.Id;
+        if (_tracksCache.TryGetValue(id, out var cached))
         {
-            var resolved = rows.Count(r => r.Resolution is not null);
-            TracksStatus = done
-                ? $"{playlistName}: {rows.Count} items · release years done"
-                : $"{playlistName}: {rows.Count} items · release years {resolved}/{rows.Count} (looking up, ~1/sec)…";
+            return cached;
         }
 
-        UpdateStatus(done: rows.All(r => r.Resolution is not null));
-
-        foreach (var row in rows)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (row.Resolution is null && !row.IsResolving)
-            {
-                await ResolveRowAsync(row, force: false, cancellationToken);
-                UpdateStatus(done: false);
-            }
-        }
-
-        UpdateStatus(done: true);
+        var tracks = await _spotify.GetPlaylistItemsAsync(id, cancellationToken);
+        _tracksCache[id] = tracks;
+        return tracks;
     }
 
-    private async Task ResolveRowAsync(TrackRowViewModel row, bool force, CancellationToken cancellationToken)
+    private async Task ResolveTrackAsync(PlaylistTrackInfo track, bool force, CancellationToken cancellationToken)
     {
-        row.IsResolving = true;
+        if (track.TrackId is not { } trackId || !_inFlightLookups.Add(trackId))
+        {
+            return; // already being looked up
+        }
+
+        SetRowsResolving(trackId, true);
         try
         {
-            row.Resolution = await _resolver.ResolveAsync(row.Info, force, cancellationToken);
+            ApplyResolution(trackId, await _resolver.ResolveAsync(track, force, cancellationToken));
         }
         catch (OperationCanceledException)
         {
-            // Playlist changed; the row stays unresolved.
+            // Playlist changed, or the lookup pass was stopped.
         }
         catch (Exception ex)
         {
-            TracksStatus = $"Release year lookup failed: {ex.Message}";
+            YearsStatus = $"Release year lookup failed: {ex.Message}";
         }
         finally
         {
-            row.IsResolving = false;
+            _inFlightLookups.Remove(trackId);
+            SetRowsResolving(trackId, false);
         }
+    }
+
+    private void ApplyResolution(string trackId, ResolvedReleaseYear resolution)
+    {
+        foreach (var row in Tracks)
+        {
+            if (row.Info.TrackId == trackId)
+            {
+                row.Resolution = resolution;
+            }
+        }
+    }
+
+    private void SetRowsResolving(string trackId, bool isResolving)
+    {
+        foreach (var row in Tracks)
+        {
+            if (row.Info.TrackId == trackId)
+            {
+                row.IsResolving = isResolving;
+            }
+        }
+    }
+
+    private static string Progress(int done, int total, TimeSpan elapsed, int lookedUp)
+    {
+        var text = $"Release years: {done}/{total} songs";
+        if (lookedUp > 0 && done < total)
+        {
+            var remaining = elapsed / lookedUp * (total - done);
+            text += remaining.TotalMinutes >= 1
+                ? $" · about {Math.Ceiling(remaining.TotalMinutes)} min left"
+                : " · nearly done";
+        }
+
+        return text;
     }
 
     private void OnSelectionChanged()

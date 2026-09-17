@@ -39,20 +39,9 @@ public sealed class SpotifyService : ISpotifyService
     public async Task ConnectAsync(CancellationToken cancellationToken)
     {
         var settings = SpotifySettings.Load();
-
-        var storedToken = _tokenStore.Load();
-        if (storedToken is not null && HasRequiredScopes(storedToken))
+        if (await TryConnectWithSavedLoginAsync(settings, cancellationToken))
         {
-            try
-            {
-                await CreateClientAsync(settings, storedToken, cancellationToken);
-                return;
-            }
-            catch (APIException)
-            {
-                // Refresh token revoked or issued for a different Client ID; fall back to signing in.
-                _tokenStore.Clear();
-            }
+            return;
         }
 
         var token = await SignInWithBrowserAsync(settings, cancellationToken);
@@ -171,7 +160,13 @@ public sealed class SpotifyService : ISpotifyService
     private async Task CreateClientAsync(SpotifySettings settings, PKCETokenResponse token, CancellationToken cancellationToken)
     {
         var authenticator = new PKCEAuthenticator(settings.ClientId, token);
-        authenticator.TokenRefreshed += (_, refreshed) => _tokenStore.Save(refreshed);
+        var lastRefreshToken = token.RefreshToken;
+        authenticator.TokenRefreshed += (_, refreshed) =>
+        {
+            lastRefreshToken = KeepRefreshToken(refreshed, lastRefreshToken);
+            KeepRefreshToken(authenticator.InitialToken, lastRefreshToken);
+            _tokenStore.Save(refreshed);
+        };
 
         var config = SpotifyClientConfig.CreateDefault()
             .WithAuthenticator(authenticator)
@@ -216,7 +211,53 @@ public sealed class SpotifyService : ISpotifyService
             new PKCETokenRequest(settings.ClientId, code, settings.RedirectUri, verifier), cancellationToken);
     }
 
-    private static bool HasRequiredScopes(PKCETokenResponse token)
+    /// <summary>
+    /// Connects with the saved login only; never opens a browser. False if there's no usable saved login.
+    /// </summary>
+    internal async Task<bool> TryConnectWithSavedLoginAsync(CancellationToken cancellationToken) =>
+        await TryConnectWithSavedLoginAsync(SpotifySettings.Load(), cancellationToken);
+
+    private async Task<bool> TryConnectWithSavedLoginAsync(SpotifySettings settings, CancellationToken cancellationToken)
+    {
+        var storedToken = _tokenStore.Load();
+        if (storedToken is null || !HasRequiredScopes(storedToken) || !CanStillBeUsed(storedToken))
+        {
+            return false;
+        }
+
+        try
+        {
+            await CreateClientAsync(settings, storedToken, cancellationToken);
+            return true;
+        }
+        catch (Exception ex) when (ex is APIException or ArgumentException)
+        {
+            // Refresh token revoked, missing, or issued for a different Client ID.
+            _tokenStore.Clear();
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Spotify doesn't always return a new refresh token on refresh; the previous one stays valid.
+    /// Saving the response as-is would wipe it and break the next refresh. Returns the refresh token to keep using.
+    /// </summary>
+    internal static string KeepRefreshToken(PKCETokenResponse token, string previousRefreshToken)
+    {
+        if (string.IsNullOrEmpty(token.RefreshToken))
+        {
+            token.RefreshToken = previousRefreshToken;
+            return previousRefreshToken;
+        }
+
+        return token.RefreshToken;
+    }
+
+    /// <summary>An expired token is only usable if it can be refreshed.</summary>
+    internal static bool CanStillBeUsed(PKCETokenResponse token) =>
+        !string.IsNullOrEmpty(token.RefreshToken) || !token.IsExpired;
+
+    internal static bool HasRequiredScopes(PKCETokenResponse token)
     {
         var granted = (token.Scope ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
         return RequiredScopes.All(granted.Contains);

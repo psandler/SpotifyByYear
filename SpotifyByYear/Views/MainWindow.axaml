@@ -25,8 +25,13 @@
                 <Button Content="Cancel"
                         Command="{Binding LoadPlaylistsCancelCommand}"
                         IsVisible="{Binding LoadPlaylistsCommand.IsRunning}" />
+                <Button Content="Look up all years" Command="{Binding ResolveAllYearsCommand}" />
+                <Button Content="Stop lookups"
+                        Command="{Binding ResolveAllYearsCancelCommand}"
+                        IsVisible="{Binding ResolveAllYearsCommand.IsRunning}" />
             </StackPanel>
             <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding YearsStatus}" TextWrapping="Wrap" Foreground="Gray" />
         </StackPanel>
 
         <Grid ColumnDefinitions="350,6,*,6,*">

@@ -23,6 +23,40 @@ public static partial class TrackMatching
     [GeneratedRegex(@"\b(live|demo|instrumental|karaoke|remix|rehearsal|acoustic|a cappella|cover)\b", RegexOptions.IgnoreCase)]
     private static partial Regex AlternateVersion();
 
+    // A version segment or bracket mentioning "live": "Valerie - Live At BBC Radio 1 / 2007", "(Live at Wembley)".
+    // Titles like "Live and Let Die" or "Alive" don't match.
+    [GeneratedRegex(@"\s+-\s+(?:(?!\s-\s).)*\blive\b(?:(?!\s-\s).)*$|[\(\[][^\)\]]*\blive\b[^\)\]]*[\)\]]", RegexOptions.IgnoreCase)]
+    private static partial Regex LiveMarker();
+
+    [GeneratedRegex(@"\blive\b", RegexOptions.IgnoreCase)]
+    private static partial Regex LiveWord();
+
+    [GeneratedRegex(@"\b(19\d{2}|20\d{2})\b")]
+    private static partial Regex FourDigitYear();
+
+    /// <summary>True when the title marks this copy as a live recording.</summary>
+    public static bool IsLiveVersion(string title) => LiveMarker().IsMatch(title);
+
+    /// <summary>Year written in the live marker, e.g. 2007 from "- Live At BBC Radio 1 Live Lounge, London / 2007".</summary>
+    public static int? LiveYearFromTitle(string title)
+    {
+        var marker = LiveMarker().Match(title);
+        if (!marker.Success)
+        {
+            return null;
+        }
+
+        var years = FourDigitYear().Matches(marker.Value);
+        return years.Count > 0 ? int.Parse(years[^1].Value, CultureInfo.InvariantCulture) : null;
+    }
+
+    public static bool IsLiveDisambiguation(string? disambiguation) =>
+        !string.IsNullOrEmpty(disambiguation) && LiveWord().IsMatch(disambiguation);
+
+    /// <summary>Compares full titles, version text included (used for live versions).</summary>
+    public static bool TitlesMatchExactly(string a, string b) =>
+        Normalize(a) is { Length: > 0 } na && na == Normalize(b);
+
     /// <summary>Removes remaster/live/version decorations from a title.</summary>
     public static string CleanTitle(string title)
     {
