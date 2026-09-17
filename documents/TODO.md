@@ -14,6 +14,8 @@ Goal: a desktop app (Avalonia) that reads my Spotify playlists and builds new pl
 - [x] Add `.editorconfig` (default `dotnet new editorconfig` style)
 - [x] Create `CLAUDE.md` (project overview, build/run commands, conventions, Spotify API gotchas, no-git-writes rule)
 - [x] Add `README.md` (what it is, how the year is worked out, Spotify app setup, build/run, tests, where data is stored)
+- [x] Add `LICENSE` (MIT)
+- [ ] **(Human)** Commit and push `LICENSE`; check GitHub shows "MIT license" in the repo sidebar
 - [x] **(Human)** Initial commit
 - [x] **(Human)** Create GitHub repo and push (https://github.com/psandler/SpotifyByYear)
 - [x] Add a test project (`SpotifyByYear.Tests`, xUnit v3): offline unit tests with fakes; 2 live MusicBrainz/Spotify tests opt-in via `SPOTIFYBYYEAR_LIVE_TESTS=1`. `global.json` opts into Microsoft.Testing.Platform (`dotnet test --solution SpotifyByYear.slnx`)

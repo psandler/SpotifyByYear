@@ -139,3 +139,7 @@ CLAUDE.md               notes for Claude Code, which helps build this project
 - [SpotifyAPI-NET](https://github.com/JohnnyCrazy/SpotifyAPI-NET) for the Spotify Web API
 - Release data from [MusicBrainz](https://musicbrainz.org/)
 - [xUnit](https://xunit.net/) for tests
+
+## License
+
+[MIT](LICENSE)
